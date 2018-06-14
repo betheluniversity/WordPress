@@ -1,3 +1,4 @@
 *.db
 wp-content/themes/.DS_Store
 *.sql
+wp-config.php
