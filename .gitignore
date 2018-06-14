@@ -1,0 +1,3 @@
+*.db
+wp-content/themes/.DS_Store
+*.sql
