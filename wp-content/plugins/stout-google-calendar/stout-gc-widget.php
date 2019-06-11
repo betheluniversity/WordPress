@@ -33,7 +33,7 @@ class Stout_GC_Widget extends WP_Widget {
 	/**
 	 * Widget setup.
 	 */
-	function Stout_GC_Widget() {
+	function __construct() {
 		/* Widget settings. */
 		$widget_ops = array( 'classname' => 'stout-gc-widget', 'description' => __('Embed a saved Stout Google Calendar.', 'stout-gc') );
 
@@ -41,7 +41,7 @@ class Stout_GC_Widget extends WP_Widget {
 		$control_ops = array( 'width' => '100%', 'height' => 350, 'id_base' => 'stout-gc-widget' );
 
 		/* Create the widget. */
-		$this->WP_Widget( 'stout-gc-widget', __('Stout Google Calendar', 'stout-gc'), $widget_ops, $control_ops );
+		$this->__construct( 'stout-gc-widget', __('Stout Google Calendar', 'stout-gc'), $widget_ops, $control_ops );
 	}
 
 	/**

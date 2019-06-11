@@ -25,7 +25,7 @@ class LDAP {
 	var $port;
 	var $debug;
 	
-	function LDAP($options = array()) {
+	function __construct($options = array()) {
 		$this->server = $options[SERVER_NAME];
 		$this->search_dn = $options[SEARCH_BASE];
 		$this->dn = $options[PRIV_DN];
