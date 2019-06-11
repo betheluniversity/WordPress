@@ -1,0 +1,9 @@
+Home
+Archives
+If there's a sidebar menu, show that too
+
+Keep Social Media widget
+
+Keep author bio (with image) at the end of posts
+
+Optional text widget like Cascade site feature at the bottom of every page

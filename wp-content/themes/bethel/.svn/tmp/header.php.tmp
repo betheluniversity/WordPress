@@ -1,0 +1,168 @@
+<?php
+?><!DOCTYPE html>
+<!--[if IE 6]>
+<html id="ie6" <?php language_attributes(); ?>>
+<![endif]-->
+<!--[if IE 7]>
+<html id="ie7" <?php language_attributes(); ?>>
+<![endif]-->
+<!--[if IE 8]>
+<html id="ie8" <?php language_attributes(); ?>>
+<![endif]-->
+<!--[if !(IE 6) | !(IE 7) | !(IE 8)  ]><!-->
+<html <?php language_attributes(); ?>>
+<!--<![endif]-->
+<head>
+	<base href="http://www.bethel.edu/index" />
+	<title><?php wp_title('|', true, 'right'); ?> | Blogs | Bethel University Minnesota</title>
+	<meta name="description"
+		  content="Bethel is a Christian liberal arts university serving undergraduate, graduate, and seminary students in St. Paul, Minnesota." />
+	<meta name="generator" content="Silva" />
+  <script type="text/javascript" src="http://www.bethel.edu/++resource++silva.core.layout.jquery/jquery-1.4.4.min.js">
+	</script>
+
+   <script type="text/javascript" src="http://www.bethel.edu/++resource++bethel.layout.public/js/jquery.main.js">
+	</script>
+	<style media="all" type="text/css">
+	  <!-- @import url("http://www.bethel.edu/++resource++bethel.layout.public/css/all.css"); -->
+	</style>
+	
+	<link rel="stylesheet" type="text/css" media="all" href="<?php bloginfo( 'stylesheet_url' ); ?>" />
+	
+	<script type="text/javascript">$(function() { initGallery()});</script>
+	
+<meta name="access" content="public" />
+<meta http-equiv="X-UA-Compatible" content="IE=EmulateIE7" />
+<link rel="stylesheet" type="text/css" media="print" href="http://www.bethel.edu/++resource++bethel.layout.public/css/print.css" />
+
+<script type="text/javascript" src="https://use.typekit.com/gry6ozy.js"></script>
+<script type="text/javascript">try{Typekit.load();}catch(e){}</script>
+ 
+<!--[if IE]><link rel="stylesheet" type="text/css" href="http://www.bethel.edu/++resource++bethel.layout.public/css/ie.css" media="screen"/><![endif]-->
+ <!--[if lt IE 7]><script type="text/javascript" src="http://www.bethel.edu/++resource++bethel.layout.public/js/ie-png.js"></script><![endif]-->
+<link rel="shortcut icon" href="http://www.bethel.edu/++resource++bethel.layout.public/favicon.ico" />
+
+ <meta name="google-site-verification" content="0Vt7TUyXkbzMc__1uy-OQdJ1Wy0ultaqiEp6_wEED0s" />
+ <meta name="msvalidate.01" content="08A5CE48AF51D0D0EACE11E8517AA103" />
+<meta charset="<?php bloginfo( 'charset' ); ?>" />
+<meta name="viewport" content="width=device-width" />
+
+<link rel="profile" href="http://gmpg.org/xfn/11" />
+<link rel="pingback" href="<?php bloginfo( 'pingback_url' ); ?>" />
+<!--[if lt IE 9]>
+<script src="<?php echo get_template_directory_uri(); ?>/js/html5.js" type="text/javascript"></script>
+<![endif]-->
+<script type="text/javascript">
+  var disqus_developer = 1; 
+</script>
+<?php
+	/* We add some JavaScript to pages with the comment form
+	 * to support sites with threaded comments (when in use).
+	 */
+	if ( is_singular() && get_option( 'thread_comments' ) )
+		wp_enqueue_script( 'comment-reply' );
+
+	/* Always have wp_head() just before the closing </head>
+	 * tag of your theme, or you will break many plugins, which
+	 * generally use this hook to add elements to <head> such
+	 * as styles, scripts, and meta tags.
+	 */
+	wp_head();
+?>
+</head>
+
+<body <?php body_class(); ?>>
+<div id="page" class="hfeed">
+	 <div id="skip"><a href="#content-start">Skip to main content</a></div>
+<div id="wrapper">
+ <div id="header"><ul id="nav">
+ <li><a class="about" href="http://www.bethel.edu/about/">About</a></li>
+ <li><a class="academics" href="http://www.bethel.edu/academics/">Academics</a></li>
+
+ <li><a class="admission" href="http://www.bethel.edu/admissions/">Admissions</a></li>
+ <li><a class="student-life" href="http://cas.bethel.edu/student-life/">Student Life</a></li>
+ <li><a class="spiritual-life" href="http://www.bethel.edu/spiritual-life/">Spiritual Life</a></li>
+ <li><a class="athletics" href="http://athletics.bethel.edu/">Athletics</a></li>
+ <li><a class="news-events" href="http://www.bethel.edu/news-events/">News &amp; Events</a></li>
+
+ <li><a class="giving" href="http://www.bethel.edu/development/">Giving</a></li>
+</ul>
+<ul id="top-nav">
+ <li><a href="http://www.bethel.edu/admissions/">Prospective Students</a></li>
+ <li><a href="https://blink.bethel.edu/">Current Students</a></li>
+ <li><a href="http://www.bethel.edu/parents/">Parents</a></li>
+ <li><a href="https://blink.bethel.edu/">Faculty &amp; Staff</a></li>
+
+ <li><a href="http://www.bethel.edu/alumni/">Alumni</a></li>
+</ul>
+<div class="services">
+ <div id="univ-tools">
+  <a class="title" href="#">Tools &amp; Resources</a>
+  <div class="drop-down"> 
+   <div class="sub-module">
+	<ul>
+
+	 <li><a href="http://www.bethel.edu/about/contact/">Contact</a></li>
+	 <li><a href="http://www.bethel.edu/offices/">Offices</a></li>
+	</ul>
+   </div>
+   <div class="sub-module">
+	<ul>
+	 <li><a href="http://www.bethel.edu/offices/">Services</a></li>
+
+	 <li><a href="http://www.bethel.edu/admissions/">Apply</a></li>
+	</ul>
+   </div>
+   <div class="sub-module">
+	<ul>
+	 <li><a href="http://www.bethel.edu/admissions/visit">Schedule a Visit</a></li>
+	 <li><a href="https://blink.bethel.edu">Blink</a></li>
+
+	</ul>
+   </div> 
+  </div>
+ </div>
+ <h1><a class="logo" href="http://www.bethel.edu/">Bethel University</a></h1>
+ <form action="https://search.bethel.edu/search" method="get" class="search-form">
+  <fieldset>
+   <label for="search">Search</label>
+
+   <input type="text" class="txt" name="q" id="search" value="Search" onfocus="if (this.value == 'Search') this.value = '';" onblur="if (this.value == '') this.value = 'Search';" />
+   <a class="btn-search" href="javascript:document.forms[0].submit()">Search</a>
+   <input type="submit" class="btn-submit" />
+<input type="hidden" name="client" value="bethel_public" /><input type="hidden" name="proxystylesheet" value="bethel_public" /><input type="hidden" name="site" value="default_collection" /><input type="hidden" name="output" value="xml_no_dtd" />
+  </fieldset>
+ </form>
+</div>
+</div>
+
+
+	
+	<?php
+		// Check to see if the header image has been removed
+		$header_image = get_header_image();
+		if ( ! empty( $header_image ) ) :
+	?>
+	<div class="visual">
+		<div class="inner">
+			<a href="<?php echo esc_url( home_url( '/' ) ); ?>">
+			<img src="<?php header_image(); ?>" width="<?php echo HEADER_IMAGE_WIDTH; ?>" height="<?php echo HEADER_IMAGE_HEIGHT; ?>" alt="" />
+			</a>
+		</div>
+	</div>
+	
+	<?php endif; // end check for removed header image ?>
+
+	<div id="main">
+		<div class="inner">
+		
+		<ul class="breadcrumbs">
+			<?php /* Our navigation menu.  If one isn't filled out, wp_nav_menu falls back to wp_page_menu. The menu assiged to the primary position is the one used. If none is assigned, the menu with the lowest ID is used. */ ?>
+			<?php wp_nav_menu( array( 'theme_location' => 'primary' ) ); ?>
+		</ul>
+		
+		<hgroup>
+			<h2 id="site-title"><span><a href="<?php echo esc_url( home_url( '/' ) ); ?>" title="<?php echo esc_attr( get_bloginfo( 'name', 'display' ) ); ?>" rel="home"><?php bloginfo( 'name' ); ?></a></span></h2>
+			<p id="site-description"><?php bloginfo( 'description' ); ?></p>
+		</hgroup>
+		
