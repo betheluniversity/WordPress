@@ -1,9 +1,11 @@
-/* global inlineEditL10n, ajaxurl, typenow */
 /**
  * This file contains the functions needed for the inline editing of posts.
  *
  * @since 2.7.0
+ * @output wp-admin/js/inline-edit-post.js
  */
+
+/* global inlineEditL10n, ajaxurl, typenow, inlineEditPost */
 
 window.wp = window.wp || {};
 
@@ -20,10 +22,9 @@ window.wp = window.wp || {};
  * @property {string} what The prefix before the post id.
  *
  */
-var inlineEditPost;
 ( function( $, wp ) {
 
-	inlineEditPost = {
+	window.inlineEditPost = {
 
 	/**
 	 * Initializes the inline and bulk post editor.
@@ -528,8 +529,7 @@ $( document ).on( 'heartbeat-tick.wp-check-locked-posts', function( e, data ) {
 				row.addClass('wp-locked');
 			}
 		} else if ( row.hasClass('wp-locked') ) {
-			// Make room for the CSS animation
-			row.removeClass('wp-locked').delay(1000).find('.locked-info span').empty();
+			row.removeClass( 'wp-locked' ).find( '.locked-info span' ).empty();
 		}
 	});
 }).on( 'heartbeat-send.wp-check-locked-posts', function( e, data ) {

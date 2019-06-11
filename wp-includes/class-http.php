@@ -105,7 +105,8 @@ class WP_Http {
 	 * @param string|array $args {
 	 *     Optional. Array or string of HTTP request arguments.
 	 *
-	 *     @type string       $method              Request method. Accepts 'GET', 'POST', 'HEAD', or 'PUT'.
+	 *     @type string       $method              Request method. Accepts 'GET', 'POST', 'HEAD', 'PUT', 'DELETE',
+	 *                                             'TRACE', 'OPTIONS', or 'PATCH'.
 	 *                                             Some transports technically allow others, but should not be
 	 *                                             assumed. Default 'GET'.
 	 *     @type int          $timeout             How long the connection should stay open in seconds. Default 5.
@@ -152,7 +153,7 @@ class WP_Http {
 			 * Filters the timeout value for an HTTP request.
 			 *
 			 * @since 2.7.0
-			 * @since 5.0.0 The `$url` parameter was added.
+			 * @since 5.1.0 The `$url` parameter was added.
 			 *
 			 * @param int    $timeout_value Time in seconds until a request times out. Default 5.
 			 * @param string $url           The request URL.
@@ -162,7 +163,7 @@ class WP_Http {
 			 * Filters the number of redirects allowed during an HTTP request.
 			 *
 			 * @since 2.7.0
-			 * @since 5.0.0 The `$url` parameter was added.
+			 * @since 5.1.0 The `$url` parameter was added.
 			 *
 			 * @param int    $redirect_count Number of redirects allowed. Default 5.
 			 * @param string $url            The request URL.
@@ -172,7 +173,7 @@ class WP_Http {
 			 * Filters the version of the HTTP protocol used in a request.
 			 *
 			 * @since 2.7.0
-			 * @since 5.0.0 The `$url` parameter was added.
+			 * @since 5.1.0 The `$url` parameter was added.
 			 *
 			 * @param string $version Version of HTTP used. Accepts '1.0' and '1.1'. Default '1.0'.
 			 * @param string $url     The request URL.
@@ -182,7 +183,7 @@ class WP_Http {
 			 * Filters the user agent value sent with an HTTP request.
 			 *
 			 * @since 2.7.0
-			 * @since 5.0.0 The `$url` parameter was added.
+			 * @since 5.1.0 The `$url` parameter was added.
 			 *
 			 * @param string $user_agent WordPress user agent string.
 			 * @param string $url        The request URL.
@@ -192,7 +193,7 @@ class WP_Http {
 			 * Filters whether to pass URLs through wp_http_validate_url() in an HTTP request.
 			 *
 			 * @since 3.6.0
-			 * @since 5.0.0 The `$url` parameter was added.
+			 * @since 5.1.0 The `$url` parameter was added.
 			 *
 			 * @param bool   $pass_url Whether to pass URLs through wp_http_validate_url(). Default false.
 			 * @param string $url      The request URL.
@@ -271,11 +272,17 @@ class WP_Http {
 		$arrURL = @parse_url( $url );
 
 		if ( empty( $url ) || empty( $arrURL['scheme'] ) ) {
-			return new WP_Error( 'http_request_failed', __( 'A valid URL was not provided.' ) );
+			$response = new WP_Error( 'http_request_failed', __( 'A valid URL was not provided.' ) );
+			/** This action is documented in wp-includes/class-http.php */
+			do_action( 'http_api_debug', $response, 'response', 'Requests', $r, $url );
+			return $response;
 		}
 
 		if ( $this->block_request( $url ) ) {
-			return new WP_Error( 'http_request_failed', __( 'User has blocked requests through HTTP.' ) );
+			$response = new WP_Error( 'http_request_not_executed', __( 'User has blocked requests through HTTP.' ) );
+			/** This action is documented in wp-includes/class-http.php */
+			do_action( 'http_api_debug', $response, 'response', 'Requests', $r, $url );
+			return $response;
 		}
 
 		// If we are streaming to a file but no filename was given drop it in the WP temp dir
@@ -288,7 +295,10 @@ class WP_Http {
 			// Force some settings if we are streaming to a file and check for existence and perms of destination directory
 			$r['blocking'] = true;
 			if ( ! wp_is_writable( dirname( $r['filename'] ) ) ) {
-				return new WP_Error( 'http_request_failed', __( 'Destination directory for file streaming does not exist or is not writable.' ) );
+				$response = new WP_Error( 'http_request_failed', __( 'Destination directory for file streaming does not exist or is not writable.' ) );
+				/** This action is documented in wp-includes/class-http.php */
+				do_action( 'http_api_debug', $response, 'response', 'Requests', $r, $url );
+				return $response;
 			}
 		}
 
@@ -357,7 +367,7 @@ class WP_Http {
 		 * Filters whether SSL should be verified for non-local requests.
 		 *
 		 * @since 2.8.0
-		 * @since 5.0.0 The `$url` parameter was added.
+		 * @since 5.1.0 The `$url` parameter was added.
 		 *
 		 * @param bool   $ssl_verify Whether to verify the SSL connection. Default true.
 		 * @param string $url        The request URL.
@@ -448,7 +458,7 @@ class WP_Http {
 
 		foreach ( $cookies as $name => $value ) {
 			if ( $value instanceof WP_Http_Cookie ) {
-				$cookie_jar[ $value->name ] = new Requests_Cookie( $value->name, $value->value, $value->get_attributes() );
+				$cookie_jar[ $value->name ] = new Requests_Cookie( $value->name, $value->value, $value->get_attributes(), array( 'host-only' => $value->host_only ) );
 			} elseif ( is_scalar( $value ) ) {
 				$cookie_jar[ $name ] = new Requests_Cookie( $name, $value );
 			}
@@ -545,7 +555,7 @@ class WP_Http {
 	 * The order for requests is cURL, and then PHP Streams.
 	 *
 	 * @since 3.2.0
-	 * @deprecated 5.0.0 Use WP_Http::request()
+	 * @deprecated 5.1.0 Use WP_Http::request()
 	 * @see WP_Http::request()
 	 *
 	 * @param string $url URL to Request

@@ -36,6 +36,7 @@ $wp_file_descriptions = array(
 	'single.php'            => __( 'Single Post' ),
 	'page.php'              => __( 'Single Page' ),
 	'front-page.php'        => __( 'Homepage' ),
+	'privacy-policy.php'    => __( 'Privacy Policy Page' ),
 	// Attachments
 	'attachment.php'        => __( 'Attachment Template' ),
 	'image.php'             => __( 'Image Attachment Template' ),
@@ -459,7 +460,7 @@ function wp_edit_theme_plugin_file( $args ) {
 
 	// Ensure file is real.
 	if ( ! is_file( $real_file ) ) {
-		return new WP_Error( 'file_does_not_exist', __( 'No such file exists! Double check the name and try again.' ) );
+		return new WP_Error( 'file_does_not_exist', __( 'File does not exist! Please double check the name and try again.' ) );
 	}
 
 	// Ensure file extension is allowed.
@@ -741,7 +742,7 @@ function _wp_handle_upload( &$file, $overrides, $time, $action ) {
 	}
 
 	/*
-	 * This may not have orignially been intended to be overrideable,
+	 * This may not have originally been intended to be overridable,
 	 * but historically has been.
 	 */
 	if ( isset( $overrides['upload_error_strings'] ) ) {
@@ -890,11 +891,13 @@ function _wp_handle_upload( &$file, $overrides, $time, $action ) {
 	 * @param string $context The type of upload action. Values include 'upload' or 'sideload'.
 	 */
 	return apply_filters(
-		'wp_handle_upload', array(
+		'wp_handle_upload',
+		array(
 			'file' => $new_file,
 			'url'  => $url,
 			'type' => $type,
-		), 'wp_handle_sideload' === $action ? 'sideload' : 'upload'
+		),
+		'wp_handle_sideload' === $action ? 'sideload' : 'upload'
 	);
 }
 
@@ -963,12 +966,14 @@ function wp_handle_sideload( &$file, $overrides = false, $time = null ) {
  * Please note that the calling function must unlink() the file.
  *
  * @since 2.5.0
+ * @since 5.2.0 Signature Verification with SoftFail was added.
  *
- * @param string $url  The URL of the file to download.
- * @param int $timeout The timeout for the request to download the file. Default 300 seconds.
+ * @param string $url                    The URL of the file to download.
+ * @param int    $timeout                The timeout for the request to download the file. Default 300 seconds.
+ * @param bool   $signature_verification Whether to perform Signature Verification. Default false.
  * @return string|WP_Error Filename on success, WP_Error on failure.
  */
-function download_url( $url, $timeout = 300 ) {
+function download_url( $url, $timeout = 300, $signature_verification = false ) {
 	//WARNING: The file is not automatically deleted, The script must unlink() the file.
 	if ( ! $url ) {
 		return new WP_Error( 'http_no_url', __( 'Invalid URL Provided.' ) );
@@ -982,7 +987,8 @@ function download_url( $url, $timeout = 300 ) {
 	}
 
 	$response = wp_safe_remote_get(
-		$url, array(
+		$url,
+		array(
 			'timeout'  => $timeout,
 			'stream'   => true,
 			'filename' => $tmpfname,
@@ -1007,7 +1013,7 @@ function download_url( $url, $timeout = 300 ) {
 			/**
 			 * Filters the maximum error response body size in `download_url()`.
 			 *
-			 * @since 5.0.0
+			 * @since 5.1.0
 			 *
 			 * @see download_url()
 			 *
@@ -1029,6 +1035,83 @@ function download_url( $url, $timeout = 300 ) {
 			unlink( $tmpfname );
 			return $md5_check;
 		}
+	}
+
+	// If the caller expects signature verification to occur, check to see if this URL supports it.
+	if ( $signature_verification ) {
+		/**
+		 * Filters the list of hosts which should have Signature Verification attempteds on.
+		 *
+		 * @since 5.2.0
+		 *
+		 * @param array List of hostnames.
+		 */
+		$signed_hostnames       = apply_filters( 'wp_signature_hosts', array( 'wordpress.org', 'downloads.wordpress.org', 's.w.org' ) );
+		$signature_verification = in_array( parse_url( $url, PHP_URL_HOST ), $signed_hostnames, true );
+	}
+
+	// Perform signature valiation if supported.
+	if ( $signature_verification ) {
+		$signature = wp_remote_retrieve_header( $response, 'x-content-signature' );
+		if ( ! $signature ) {
+			// Retrieve signatures from a file if the header wasn't included.
+			// WordPress.org stores signatures at $package_url.sig
+
+			$signature_url = false;
+			$url_path      = parse_url( $url, PHP_URL_PATH );
+			if ( substr( $url_path, -4 ) == '.zip' || substr( $url_path, -7 ) == '.tar.gz' ) {
+				$signature_url = str_replace( $url_path, $url_path . '.sig', $url );
+			}
+
+			/**
+			 * Filter the URL where the signature for a file is located.
+			 *
+			 * @since 5.2.0
+			 *
+			 * @param false|string $signature_url The URL where signatures can be found for a file, or false if none are known.
+			 * @param string $url                 The URL being verified.
+			 */
+			$signature_url = apply_filters( 'wp_signature_url', $signature_url, $url );
+
+			if ( $signature_url ) {
+				$signature_request = wp_safe_remote_get(
+					$signature_url,
+					array(
+						'limit_response_size' => 10 * 1024, // 10KB should be large enough for quite a few signatures.
+					)
+				);
+
+				if ( ! is_wp_error( $signature_request ) && 200 === wp_remote_retrieve_response_code( $signature_request ) ) {
+					$signature = explode( "\n", wp_remote_retrieve_body( $signature_request ) );
+				}
+			}
+		}
+
+		// Perform the checks.
+		$signature_verification = verify_file_signature( $tmpfname, $signature, basename( parse_url( $url, PHP_URL_PATH ) ) );
+	}
+
+	if ( is_wp_error( $signature_verification ) ) {
+		if (
+			/**
+			 * Filters whether Signature Verification failures should be allowed to soft fail.
+			 *
+			 * WARNING: This may be removed from a future release.
+			 *
+			 * @since 5.2.0
+			 *
+			 * @param bool   $signature_softfail If a softfail is allowed.
+			 * @param string $url                The url being accessed.
+			 */
+			apply_filters( 'wp_signature_softfail', true, $url )
+		) {
+			$signature_verification->add_data( $tmpfname, 'softfail-filename' );
+		} else {
+			// Hard-fail.
+			unlink( $tmpfname );
+		}
+
+		return $signature_verification;
 	}
 
 	return $tmpfname;
@@ -1064,6 +1147,188 @@ function verify_file_md5( $filename, $expected_md5 ) {
 }
 
 /**
+ * Verifies the contents of a file against its ED25519 signature.
+ *
+ * @since 5.2.0
+ *
+ * @param string       $filename            The file to validate.
+ * @param string|array $signatures          A Signature provided for the file.
+ * @param string       $filename_for_errors A friendly filename for errors. Optional.
+ *
+ * @return bool|WP_Error true on success, false if verification not attempted, or WP_Error describing an error condition.
+ */
+function verify_file_signature( $filename, $signatures, $filename_for_errors = false ) {
+	if ( ! $filename_for_errors ) {
+		$filename_for_errors = wp_basename( $filename );
+	}
+
+	// Check we can process signatures.
+	if ( ! function_exists( 'sodium_crypto_sign_verify_detached' ) || ! in_array( 'sha384', array_map( 'strtolower', hash_algos() ) ) ) {
+		return new WP_Error(
+			'signature_verification_unsupported',
+			sprintf(
+				/* translators: %s: The filename of the package. */
+				__( 'The authenticity of %s could not be verified as signature verification is unavailable on this system.' ),
+				'<span class="code">' . esc_html( $filename_for_errors ) . '</span>'
+			),
+			( ! function_exists( 'sodium_crypto_sign_verify_detached' ) ? 'sodium_crypto_sign_verify_detached' : 'sha384' )
+		);
+	}
+
+	// Check for a edge-case affecting PHP Maths abilities
+	if (
+		! extension_loaded( 'sodium' ) &&
+		in_array( PHP_VERSION_ID, [ 70200, 70201, 70202 ], true ) &&
+		extension_loaded( 'opcache' )
+	) {
+		// Sodium_Compat isn't compatible with PHP 7.2.0~7.2.2 due to a bug in the PHP Opcache extension, bail early as it'll fail.
+		// https://bugs.php.net/bug.php?id=75938
+
+		return new WP_Error(
+			'signature_verification_unsupported',
+			sprintf(
+				/* translators: %s: The filename of the package. */
+				__( 'The authenticity of %s could not be verified as signature verification is unavailable on this system.' ),
+				'<span class="code">' . esc_html( $filename_for_errors ) . '</span>'
+			),
+			array(
+				'php'    => phpversion(),
+				'sodium' => defined( 'SODIUM_LIBRARY_VERSION' ) ? SODIUM_LIBRARY_VERSION : ( defined( 'ParagonIE_Sodium_Compat::VERSION_STRING' ) ? ParagonIE_Sodium_Compat::VERSION_STRING : false ),
+			)
+		);
+
+	}
+
+	// Verify runtime speed of Sodium_Compat is acceptable.
+	if ( ! extension_loaded( 'sodium' ) && ! ParagonIE_Sodium_Compat::polyfill_is_fast() ) {
+		$sodium_compat_is_fast = false;
+
+		// Allow for an old version of Sodium_Compat being loaded before the bundled WordPress one.
+		if ( method_exists( 'ParagonIE_Sodium_Compat', 'runtime_speed_test' ) ) {
+			// Run `ParagonIE_Sodium_Compat::runtime_speed_test()` in optimized integer mode, as that's what WordPress utilises during signing verifications.
+			$old_fastMult                      = ParagonIE_Sodium_Compat::$fastMult;
+			ParagonIE_Sodium_Compat::$fastMult = true;
+			$sodium_compat_is_fast             = ParagonIE_Sodium_Compat::runtime_speed_test( 100, 10 );
+			ParagonIE_Sodium_Compat::$fastMult = $old_fastMult;
+		}
+
+		// This cannot be performed in a reasonable amount of time
+		// https://github.com/paragonie/sodium_compat#help-sodium_compat-is-slow-how-can-i-make-it-fast
+		if ( ! $sodium_compat_is_fast ) {
+			return new WP_Error(
+				'signature_verification_unsupported',
+				sprintf(
+					/* translators: %s: The filename of the package. */
+					__( 'The authenticity of %s could not be verified as signature verification is unavailable on this system.' ),
+					'<span class="code">' . esc_html( $filename_for_errors ) . '</span>'
+				),
+				array(
+					'php'                => phpversion(),
+					'sodium'             => defined( 'SODIUM_LIBRARY_VERSION' ) ? SODIUM_LIBRARY_VERSION : ( defined( 'ParagonIE_Sodium_Compat::VERSION_STRING' ) ? ParagonIE_Sodium_Compat::VERSION_STRING : false ),
+					'polyfill_is_fast'   => false,
+					'max_execution_time' => ini_get( 'max_execution_time' ),
+				)
+			);
+		}
+	}
+
+	if ( ! $signatures ) {
+		return new WP_Error(
+			'signature_verification_no_signature',
+			sprintf(
+				/* translators: %s: The filename of the package. */
+				__( 'The authenticity of %s could not be verified as no signature was found.' ),
+				'<span class="code">' . esc_html( $filename_for_errors ) . '</span>'
+			),
+			array(
+				'filename' => $filename_for_errors,
+			)
+		);
+	}
+
+	$trusted_keys = wp_trusted_keys();
+	$file_hash    = hash_file( 'sha384', $filename, true );
+
+	mbstring_binary_safe_encoding();
+
+	$skipped_key = $skipped_signature = 0;
+
+	foreach ( (array) $signatures as $signature ) {
+		$signature_raw = base64_decode( $signature );
+
+		// Ensure only valid-length signatures are considered.
+		if ( SODIUM_CRYPTO_SIGN_BYTES !== strlen( $signature_raw ) ) {
+			$skipped_signature++;
+			continue;
+		}
+
+		foreach ( (array) $trusted_keys as $key ) {
+			$key_raw = base64_decode( $key );
+
+			// Only pass valid public keys through.
+			if ( SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES !== strlen( $key_raw ) ) {
+				$skipped_key++;
+				continue;
+			}
+
+			if ( sodium_crypto_sign_verify_detached( $signature_raw, $file_hash, $key_raw ) ) {
+				reset_mbstring_encoding();
+				return true;
+			}
+		}
+	}
+
+	reset_mbstring_encoding();
+
+	return new WP_Error(
+		'signature_verification_failed',
+		sprintf(
+			/* translators: %s: The filename of the package. */
+			__( 'The authenticity of %s could not be verified.' ),
+			'<span class="code">' . esc_html( $filename_for_errors ) . '</span>'
+		),
+		// Error data helpful for debugging:
+		array(
+			'filename'    => $filename_for_errors,
+			'keys'        => $trusted_keys,
+			'signatures'  => $signatures,
+			'hash'        => bin2hex( $file_hash ),
+			'skipped_key' => $skipped_key,
+			'skipped_sig' => $skipped_signature,
+			'php'         => phpversion(),
+			'sodium'      => defined( 'SODIUM_LIBRARY_VERSION' ) ? SODIUM_LIBRARY_VERSION : ( defined( 'ParagonIE_Sodium_Compat::VERSION_STRING' ) ? ParagonIE_Sodium_Compat::VERSION_STRING : false ),
+		)
+	);
+}
+
+/**
+ * Retrieve the list of signing keys trusted by WordPress.
+ *
+ * @since 5.2.0
+ *
+ * @return array List of base64-encoded Signing keys.
+ */
+function wp_trusted_keys() {
+	$trusted_keys = array();
+
+	if ( time() < 1617235200 ) {
+		// WordPress.org Key #1 - This key is only valid before April 1st, 2021.
+		$trusted_keys[] = 'fRPyrxb/MvVLbdsYi+OOEv4xc+Eqpsj+kkAS6gNOkI0=';
+	}
+
+	// TODO: Add key #2 with longer expiration.
+
+	/**
+	 * Filter the valid Signing keys used to verify the contents of files.
+	 *
+	 * @since 5.2.0
+	 *
+	 * @param array $trusted_keys The trusted keys that may sign packages.
+	 */
+	return apply_filters( 'wp_trusted_keys', $trusted_keys );
+}
+
+/**
  * Unzips a specified ZIP file to a location on the filesystem via the WordPress
  * Filesystem Abstraction.
  *
@@ -1094,8 +1359,8 @@ function unzip_file( $file, $to ) {
 	$needed_dirs = array();
 	$to          = trailingslashit( $to );
 
-	// Determine any parent dir's needed (of the upgrade directory)
-	if ( ! $wp_filesystem->is_dir( $to ) ) { //Only do parents if no children exist
+	// Determine any parent directories needed (of the upgrade directory).
+	if ( ! $wp_filesystem->is_dir( $to ) ) { // Only do parents if no children exist.
 		$path = preg_split( '![/\\\]!', untrailingslashit( $to ) );
 		for ( $i = count( $path ); $i >= 0; $i-- ) {
 			if ( empty( $path[ $i ] ) ) {
@@ -1110,7 +1375,7 @@ function unzip_file( $file, $to ) {
 			if ( ! $wp_filesystem->is_dir( $dir ) ) {
 				$needed_dirs[] = $dir;
 			} else {
-				break; // A folder exists, therefor, we dont need the check the levels below this
+				break; // A folder exists, therefore we don't need to check the levels below this.
 			}
 		}
 	}
@@ -1679,7 +1944,8 @@ function request_filesystem_credentials( $form_post, $type = '', $error = false,
 	}
 
 	$credentials = get_option(
-		'ftp_credentials', array(
+		'ftp_credentials',
+		array(
 			'hostname' => '',
 			'username' => '',
 		)
@@ -1786,52 +2052,51 @@ function request_filesystem_credentials( $form_post, $type = '', $error = false,
 	 */
 	$types = apply_filters( 'fs_ftp_connection_types', $types, $credentials, $type, $error, $context );
 
-?>
+	?>
 <form action="<?php echo esc_url( $form_post ); ?>" method="post">
 <div id="request-filesystem-credentials-form" class="request-filesystem-credentials-form">
-<?php
-// Print a H1 heading in the FTP credentials modal dialog, default is a H2.
-$heading_tag = 'h2';
-if ( 'plugins.php' === $pagenow || 'plugin-install.php' === $pagenow ) {
-	$heading_tag = 'h1';
-}
-echo "<$heading_tag id='request-filesystem-credentials-title'>" . __( 'Connection Information' ) . "</$heading_tag>";
-?>
+	<?php
+	// Print a H1 heading in the FTP credentials modal dialog, default is a H2.
+	$heading_tag = 'h2';
+	if ( 'plugins.php' === $pagenow || 'plugin-install.php' === $pagenow ) {
+		$heading_tag = 'h1';
+	}
+	echo "<$heading_tag id='request-filesystem-credentials-title'>" . __( 'Connection Information' ) . "</$heading_tag>";
+	?>
 <p id="request-filesystem-credentials-desc">
-<?php
+	<?php
 	$label_user = __( 'Username' );
 	$label_pass = __( 'Password' );
 	_e( 'To perform the requested action, WordPress needs to access your web server.' );
 	echo ' ';
-if ( ( isset( $types['ftp'] ) || isset( $types['ftps'] ) ) ) {
-	if ( isset( $types['ssh'] ) ) {
-		_e( 'Please enter your FTP or SSH credentials to proceed.' );
-		$label_user = __( 'FTP/SSH Username' );
-		$label_pass = __( 'FTP/SSH Password' );
-	} else {
-		_e( 'Please enter your FTP credentials to proceed.' );
-		$label_user = __( 'FTP Username' );
-		$label_pass = __( 'FTP Password' );
+	if ( ( isset( $types['ftp'] ) || isset( $types['ftps'] ) ) ) {
+		if ( isset( $types['ssh'] ) ) {
+			_e( 'Please enter your FTP or SSH credentials to proceed.' );
+			$label_user = __( 'FTP/SSH Username' );
+			$label_pass = __( 'FTP/SSH Password' );
+		} else {
+			_e( 'Please enter your FTP credentials to proceed.' );
+			$label_user = __( 'FTP Username' );
+			$label_pass = __( 'FTP Password' );
+		}
+		echo ' ';
 	}
-	echo ' ';
-}
 	_e( 'If you do not remember your credentials, you should contact your web host.' );
 
+	$hostname_value = esc_attr( $hostname );
+	if ( ! empty( $port ) ) {
+		$hostname_value .= ":$port";
+	}
+
 	$password_value = '';
-if ( defined( 'FTP_PASS' ) ) {
-	$password_value = '*****';
-}
-?>
+	if ( defined( 'FTP_PASS' ) ) {
+		$password_value = '*****';
+	}
+	?>
 </p>
 <label for="hostname">
 	<span class="field-title"><?php _e( 'Hostname' ); ?></span>
-	<input name="hostname" type="text" id="hostname" aria-describedby="request-filesystem-credentials-desc" class="code" placeholder="<?php esc_attr_e( 'example: www.wordpress.org' ); ?>" value="
-																																						<?php
-																																						echo esc_attr( $hostname );
-																																						if ( ! empty( $port ) ) {
-																																							echo ":$port";}
-?>
-"<?php disabled( defined( 'FTP_HOST' ) ); ?> />
+	<input name="hostname" type="text" id="hostname" aria-describedby="request-filesystem-credentials-desc" class="code" placeholder="<?php esc_attr_e( 'example: www.wordpress.org' ); ?>" value="<?php echo $hostname_value; ?>"<?php disabled( defined( 'FTP_HOST' ) ); ?> />
 </label>
 <div class="ftp-username">
 	<label for="username">
@@ -1847,36 +2112,31 @@ if ( defined( 'FTP_PASS' ) ) {
 		<?php
 		if ( ! defined( 'FTP_PASS' ) ) {
 			_e( 'This password will not be stored on the server.' );}
-?>
+		?>
 </em>
 	</label>
 </div>
 <fieldset>
 <legend><?php _e( 'Connection Type' ); ?></legend>
-<?php
+	<?php
 	$disabled = disabled( ( defined( 'FTP_SSL' ) && FTP_SSL ) || ( defined( 'FTP_SSH' ) && FTP_SSH ), true, false );
-foreach ( $types as $name => $text ) :
-	?>
+	foreach ( $types as $name => $text ) :
+		?>
 	<label for="<?php echo esc_attr( $name ); ?>">
-		<input type="radio" name="connection_type" id="<?php echo esc_attr( $name ); ?>" value="<?php echo esc_attr( $name ); ?>"
-																	<?php
-																	checked( $name, $connection_type );
-																	echo $disabled;
-?>
- />
+		<input type="radio" name="connection_type" id="<?php echo esc_attr( $name ); ?>" value="<?php echo esc_attr( $name ); ?>" <?php checked( $name, $connection_type ); ?> <?php echo $disabled; ?> />
 		<?php echo $text; ?>
 	</label>
-<?php
+		<?php
 	endforeach;
-?>
+	?>
 </fieldset>
-<?php
-if ( isset( $types['ssh'] ) ) {
-	$hidden_class = '';
-	if ( 'ssh' != $connection_type || empty( $connection_type ) ) {
-		$hidden_class = ' class="hidden"';
-	}
-?>
+	<?php
+	if ( isset( $types['ssh'] ) ) {
+		$hidden_class = '';
+		if ( 'ssh' != $connection_type || empty( $connection_type ) ) {
+			$hidden_class = ' class="hidden"';
+		}
+		?>
 <fieldset id="ssh-keys"<?php echo $hidden_class; ?>>
 <legend><?php _e( 'Authentication Keys' ); ?></legend>
 <label for="public_key">
@@ -1889,15 +2149,15 @@ if ( isset( $types['ssh'] ) ) {
 </label>
 <p id="auth-keys-desc"><?php _e( 'Enter the location on the server where the public and private keys are located. If a passphrase is needed, enter that in the password field above.' ); ?></p>
 </fieldset>
-<?php
-}
-
-foreach ( (array) $extra_fields as $field ) {
-	if ( isset( $submitted_form[ $field ] ) ) {
-		echo '<input type="hidden" name="' . esc_attr( $field ) . '" value="' . esc_attr( $submitted_form[ $field ] ) . '" />';
+		<?php
 	}
-}
-?>
+
+	foreach ( (array) $extra_fields as $field ) {
+		if ( isset( $submitted_form[ $field ] ) ) {
+			echo '<input type="hidden" name="' . esc_attr( $field ) . '" value="' . esc_attr( $submitted_form[ $field ] ) . '" />';
+		}
+	}
+	?>
 	<p class="request-filesystem-credentials-action-buttons">
 		<?php wp_nonce_field( 'filesystem-credentials', '_fs_nonce', false, true ); ?>
 		<button class="button cancel-button" data-js-action="close" type="button"><?php _e( 'Cancel' ); ?></button>
@@ -1905,7 +2165,7 @@ foreach ( (array) $extra_fields as $field ) {
 	</p>
 </div>
 </form>
-<?php
+	<?php
 	return false;
 }
 
@@ -1933,445 +2193,4 @@ function wp_print_request_filesystem_credentials_modal() {
 		</div>
 	</div>
 	<?php
-}
-
-/**
- * Generate a single group for the personal data export report.
- *
- * @since 4.9.6
- *
- * @param array  $group_data {
- *     The group data to render.
- *
- *     @type string $group_label  The user-facing heading for the group, e.g. 'Comments'.
- *     @type array  $items        {
- *         An array of group items.
- *
- *         @type array  $group_item_data  {
- *             An array of name-value pairs for the item.
- *
- *             @type string $name   The user-facing name of an item name-value pair, e.g. 'IP Address'.
- *             @type string $value  The user-facing value of an item data pair, e.g. '50.60.70.0'.
- *         }
- *     }
- * }
- * @return string The HTML for this group and its items.
- */
-function wp_privacy_generate_personal_data_export_group_html( $group_data ) {
-	$allowed_tags      = array(
-		'a' => array(
-			'href'   => array(),
-			'target' => array()
-		),
-		'br' => array()
-	);
-	$allowed_protocols = array( 'http', 'https' );
-	$group_html        = '';
-
-	$group_html .= '<h2>' . esc_html( $group_data['group_label'] ) . '</h2>';
-	$group_html .= '<div>';
-
-	foreach ( (array) $group_data['items'] as $group_item_id => $group_item_data ) {
-		$group_html .= '<table>';
-		$group_html .= '<tbody>';
-
-		foreach ( (array) $group_item_data as $group_item_datum ) {
-			$value = $group_item_datum['value'];
-			// If it looks like a link, make it a link
-			if ( false === strpos( $value, ' ' ) && ( 0 === strpos( $value, 'http://' ) || 0 === strpos( $value, 'https://' ) ) ) {
-				$value = '<a href="' . esc_url( $value ) . '">' . esc_html( $value ) . '</a>';
-			}
-
-			$group_html .= '<tr>';
-			$group_html .= '<th>' . esc_html( $group_item_datum['name'] ) . '</th>';
-			$group_html .= '<td>' . wp_kses( $value, $allowed_tags, $allowed_protocols ) . '</td>';
-			$group_html .= '</tr>';
-		}
-
-		$group_html .= '</tbody>';
-		$group_html .= '</table>';
-	}
-
-	$group_html .= '</div>';
-
-	return $group_html;
-}
-
-/**
- * Generate the personal data export file.
- *
- * @since 4.9.6
- *
- * @param int  $request_id  The export request ID.
- */
-function wp_privacy_generate_personal_data_export_file( $request_id ) {
-	if ( ! class_exists( 'ZipArchive' ) ) {
-		wp_send_json_error( __( 'Unable to generate export file. ZipArchive not available.' ) );
-	}
-
-	// Get the request data.
-	$request = wp_get_user_request_data( $request_id );
-
-	if ( ! $request || 'export_personal_data' !== $request->action_name ) {
-		wp_send_json_error( __( 'Invalid request ID when generating export file.' ) );
-	}
-
-	$email_address = $request->email;
-
-	if ( ! is_email( $email_address ) ) {
-		wp_send_json_error( __( 'Invalid email address when generating export file.' ) );
-	}
-
-	// Create the exports folder if needed.
-	$upload_dir  = wp_upload_dir();
-	$exports_dir = trailingslashit( $upload_dir['basedir'] . '/exports' );
-	$exports_url = trailingslashit( $upload_dir['baseurl'] . '/exports' );
-
-	$result = wp_mkdir_p( $exports_dir );
-	if ( is_wp_error( $result ) ) {
-		wp_send_json_error( $result->get_error_message() );
-	}
-
-	// Protect export folder from browsing.
-	$index_pathname = $exports_dir . 'index.html';
-	if ( ! file_exists( $index_pathname ) ) {
-		$file = fopen( $index_pathname, 'w' );
-		if ( false === $file ) {
-			wp_send_json_error( __( 'Unable to protect export folder from browsing.' ) );
-		}
-		fwrite( $file, 'Silence is golden.' );
-		fclose( $file );
-	}
-
-	$stripped_email       = str_replace( '@', '-at-', $email_address );
-	$stripped_email       = sanitize_title( $stripped_email ); // slugify the email address
-	$obscura              = wp_generate_password( 32, false, false );
-	$file_basename        = 'wp-personal-data-file-' . $stripped_email . '-' . $obscura;
-	$html_report_filename = $file_basename . '.html';
-	$html_report_pathname = $exports_dir . $html_report_filename;
-	$file = fopen( $html_report_pathname, 'w' );
-	if ( false === $file ) {
-		wp_send_json_error( __( 'Unable to open export file (HTML report) for writing.' ) );
-	}
-
-	$title = sprintf(
-		/* translators: %s: user's e-mail address */
-		__( 'Personal Data Export for %s' ),
-		$email_address
-	);
-
-	// Open HTML.
-	fwrite( $file, "<!DOCTYPE html>\n" );
-	fwrite( $file, "<html>\n" );
-
-	// Head.
-	fwrite( $file, "<head>\n" );
-	fwrite( $file, "<meta http-equiv='Content-Type' content='text/html; charset=UTF-8' />\n" );
-	fwrite( $file, "<style type='text/css'>" );
-	fwrite( $file, "body { color: black; font-family: Arial, sans-serif; font-size: 11pt; margin: 15px auto; width: 860px; }" );
-	fwrite( $file, "table { background: #f0f0f0; border: 1px solid #ddd; margin-bottom: 20px; width: 100%; }" );
-	fwrite( $file, "th { padding: 5px; text-align: left; width: 20%; }" );
-	fwrite( $file, "td { padding: 5px; }" );
-	fwrite( $file, "tr:nth-child(odd) { background-color: #fafafa; }" );
-	fwrite( $file, "</style>" );
-	fwrite( $file, "<title>" );
-	fwrite( $file, esc_html( $title ) );
-	fwrite( $file, "</title>" );
-	fwrite( $file, "</head>\n" );
-
-	// Body.
-	fwrite( $file, "<body>\n" );
-
-	// Heading.
-	fwrite( $file, "<h1>" . esc_html__( 'Personal Data Export' ) . "</h1>" );
-
-	// And now, all the Groups.
-	$groups = get_post_meta( $request_id, '_export_data_grouped', true );
-
-	// First, build an "About" group on the fly for this report.
-	$about_group = array(
-		'group_label' => __( 'About' ),
-		'items'       => array(
-			'about-1' => array(
-				array(
-					'name'  => _x( 'Report generated for', 'email address' ),
-					'value' => $email_address,
-				),
-				array(
-					'name'  => _x( 'For site', 'website name' ),
-					'value' => get_bloginfo( 'name' ),
-				),
-				array(
-					'name'  => _x( 'At URL', 'website URL' ),
-					'value' => get_bloginfo( 'url' ),
-				),
-				array(
-					'name'  => _x( 'On', 'date/time' ),
-					'value' => current_time( 'mysql' ),
-				),
-			),
-		),
-	);
-
-	// Merge in the special about group.
-	$groups = array_merge( array( 'about' => $about_group ), $groups );
-
-	// Now, iterate over every group in $groups and have the formatter render it in HTML.
-	foreach ( (array) $groups as $group_id => $group_data ) {
-		fwrite( $file, wp_privacy_generate_personal_data_export_group_html( $group_data ) );
-	}
-
-	fwrite( $file, "</body>\n" );
-
-	// Close HTML.
-	fwrite( $file, "</html>\n" );
-	fclose( $file );
-
-	// Now, generate the ZIP.
-	$error            = false;
-	$archive_filename = $file_basename . '.zip';
-	$archive_pathname = $exports_dir . $archive_filename;
-	$archive_url      = $exports_url . $archive_filename;
-
-	$zip = new ZipArchive;
-	if ( true === $zip->open( $archive_pathname, ZipArchive::CREATE ) ) {
-		if ( ! $zip->addFile( $html_report_pathname, 'index.html' ) ) {
-			$error = __( 'Unable to add data to export file.' );
-		}
-
-		$zip->close();
-
-		if ( ! $error ) {
-			/**
-			 * Fires right after all personal data has been written to the export file.
-			 *
-			 * @since 4.9.6
-			 *
-			 * @param string $archive_pathname     The full path to the export file on the filesystem.
-			 * @param string $archive_url          The URL of the archive file.
-			 * @param string $html_report_pathname The full path to the personal data report on the filesystem.
-			 */
-			do_action( 'wp_privacy_personal_data_export_file_created', $archive_pathname, $archive_url, $html_report_pathname );
-		}
-	} else {
-		$error = __( 'Unable to open export file (archive) for writing.' );
-	}
-
-	// And remove the HTML file.
-	unlink( $html_report_pathname );
-
-	if ( $error ) {
-		wp_send_json_error( $error );
-	}
-
-	// Save the export file in the request.
-	update_post_meta( $request_id, '_export_file_url', $archive_url );
-	update_post_meta( $request_id, '_export_file_path', $archive_pathname );
-}
-
-/**
- * Send an email to the user with a link to the personal data export file
- *
- * @since 4.9.6
- *
- * @param int  $request_id  The request ID for this personal data export.
- * @return true|WP_Error    True on success or `WP_Error` on failure.
- */
-function wp_privacy_send_personal_data_export_email( $request_id ) {
-	// Get the request data.
-	$request = wp_get_user_request_data( $request_id );
-
-	if ( ! $request || 'export_personal_data' !== $request->action_name ) {
-		return new WP_Error( 'invalid', __( 'Invalid request ID when sending personal data export email.' ) );
-	}
-
-	/** This filter is documented in wp-admin/includes/file.php */
-	$expiration      = apply_filters( 'wp_privacy_export_expiration', 3 * DAY_IN_SECONDS );
-	$expiration_date = date_i18n( get_option( 'date_format' ), time() + $expiration );
-
-/* translators: Do not translate EXPIRATION, LINK, EMAIL, SITENAME, SITEURL: those are placeholders. */
-$email_text = __(
-'Howdy,
-
-Your request for an export of personal data has been completed. You may
-download your personal data by clicking on the link below. For privacy
-and security, we will automatically delete the file on ###EXPIRATION###,
-so please download it before then.
-
-###LINK###
-
-This email has been sent to ###EMAIL###.
-
-Regards,
-All at ###SITENAME###
-###SITEURL###'
-);
-
-	/**
-	 * Filters the text of the email sent with a personal data export file.
-	 *
-	 * The following strings have a special meaning and will get replaced dynamically:
-	 * ###EXPIRATION###         The date when the URL will be automatically deleted.
-	 * ###LINK###               URL of the personal data export file for the user.
-	 * ###EMAIL###              The email we are sending to.
-	 * ###SITENAME###           The name of the site.
-	 * ###SITEURL###            The URL to the site.
-	 *
-	 * @since 4.9.6
-	 *
-	 * @param string $email_text     Text in the email.
-	 * @param int    $request_id     The request ID for this personal data export.
-	 */
-	$content = apply_filters( 'wp_privacy_personal_data_email_content', $email_text, $request_id );
-
-	$email_address = $request->email;
-	$export_file_url = get_post_meta( $request_id, '_export_file_url', true );
-	$site_name = is_multisite() ? get_site_option( 'site_name' ) : get_option( 'blogname' );
-	$site_url = network_home_url();
-
-	$content = str_replace( '###EXPIRATION###', $expiration_date, $content );
-	$content = str_replace( '###LINK###', esc_url_raw( $export_file_url ), $content );
-	$content = str_replace( '###EMAIL###', $email_address, $content );
-	$content = str_replace( '###SITENAME###', wp_specialchars_decode( $site_name, ENT_QUOTES ), $content );
-	$content = str_replace( '###SITEURL###', esc_url_raw( $site_url ), $content );
-
-	$mail_success = wp_mail(
-		$email_address,
-		sprintf(
-			__( '[%s] Personal Data Export' ),
-			wp_specialchars_decode( get_option( 'blogname' ), ENT_QUOTES )
-		),
-		$content
-	);
-
-	if ( ! $mail_success ) {
-		return new WP_Error( 'error', __( 'Unable to send personal data export email.' ) );
-	}
-
-	return true;
-}
-
-/**
- * Intercept personal data exporter page ajax responses in order to assemble the personal data export file.
- * @see wp_privacy_personal_data_export_page
- * @since 4.9.6
- *
- * @param array  $response        The response from the personal data exporter for the given page.
- * @param int    $exporter_index  The index of the personal data exporter. Begins at 1.
- * @param string $email_address   The email address of the user whose personal data this is.
- * @param int    $page            The page of personal data for this exporter. Begins at 1.
- * @param int    $request_id      The request ID for this personal data export.
- * @param bool   $send_as_email   Whether the final results of the export should be emailed to the user.
- * @param string $exporter_key    The slug (key) of the exporter.
- * @return array The filtered response.
- */
-function wp_privacy_process_personal_data_export_page( $response, $exporter_index, $email_address, $page, $request_id, $send_as_email, $exporter_key ) {
-	/* Do some simple checks on the shape of the response from the exporter.
-	 * If the exporter response is malformed, don't attempt to consume it - let it
-	 * pass through to generate a warning to the user by default ajax processing.
-	 */
-	if ( ! is_array( $response ) ) {
-		return $response;
-	}
-
-	if ( ! array_key_exists( 'done', $response ) ) {
-		return $response;
-	}
-
-	if ( ! array_key_exists( 'data', $response ) ) {
-		return $response;
-	}
-
-	if ( ! is_array( $response['data'] ) ) {
-		return $response;
-	}
-
-	// Get the request data.
-	$request = wp_get_user_request_data( $request_id );
-
-	if ( ! $request || 'export_personal_data' !== $request->action_name ) {
-		wp_send_json_error( __( 'Invalid request ID when merging exporter data.' ) );
-	}
-
-	$export_data = array();
-
-	// First exporter, first page? Reset the report data accumulation array.
-	if ( 1 === $exporter_index && 1 === $page ) {
-		update_post_meta( $request_id, '_export_data_raw', $export_data );
-	} else {
-		$export_data = get_post_meta( $request_id, '_export_data_raw', true );
-	}
-
-	// Now, merge the data from the exporter response into the data we have accumulated already.
-	$export_data = array_merge( $export_data, $response['data'] );
-	update_post_meta( $request_id, '_export_data_raw', $export_data );
-
-	// If we are not yet on the last page of the last exporter, return now.
-	$exporters = apply_filters( 'wp_privacy_personal_data_exporters', array() );
-	$is_last_exporter = $exporter_index === count( $exporters );
-	$exporter_done = $response['done'];
-	if ( ! $is_last_exporter || ! $exporter_done ) {
-		return $response;
-	}
-
-	// Last exporter, last page - let's prepare the export file.
-
-	// First we need to re-organize the raw data hierarchically in groups and items.
-	$groups = array();
-	foreach ( (array) $export_data as $export_datum ) {
-		$group_id    = $export_datum['group_id'];
-		$group_label = $export_datum['group_label'];
-		if ( ! array_key_exists( $group_id, $groups ) ) {
-			$groups[ $group_id ] = array(
-				'group_label' => $group_label,
-				'items'       => array(),
-			);
-		}
-
-		$item_id = $export_datum['item_id'];
-		if ( ! array_key_exists( $item_id, $groups[ $group_id ]['items'] ) ) {
-			$groups[ $group_id ]['items'][ $item_id ] = array();
-		}
-
-		$old_item_data = $groups[ $group_id ]['items'][ $item_id ];
-		$merged_item_data = array_merge( $export_datum['data'], $old_item_data );
-		$groups[ $group_id ]['items'][ $item_id ] = $merged_item_data;
-	}
-
-	// Then save the grouped data into the request.
-	delete_post_meta( $request_id, '_export_data_raw' );
-	update_post_meta( $request_id, '_export_data_grouped', $groups );
-
-	// And now, generate the export file, cleaning up any previous file
-	$export_path = get_post_meta( $request_id, '_export_file_path', true );
-	if ( ! empty( $export_path ) ) {
-		delete_post_meta( $request_id, '_export_file_path' );
-		@unlink( $export_path );
-	}
-	delete_post_meta( $request_id, '_export_file_url' );
-
-	// Generate the export file from the collected, grouped personal data.
-	do_action( 'wp_privacy_personal_data_export_file', $request_id );
-
-	// Clear the grouped data now that it is no longer needed.
-	delete_post_meta( $request_id, '_export_data_grouped' );
-
-	// If the destination is email, send it now.
-	if ( $send_as_email ) {
-		$mail_success = wp_privacy_send_personal_data_export_email( $request_id );
-		if ( is_wp_error( $mail_success ) ) {
-			wp_send_json_error( $mail_success->get_error_message() );
-		}
-	} else {
-		// Modify the response to include the URL of the export file so the browser can fetch it.
-		$export_file_url = get_post_meta( $request_id, '_export_file_url', true );
-		if ( ! empty( $export_file_url ) ) {
-			$response['url'] = $export_file_url;
-		}
-	}
-
-	// Update the request to completed state.
-	_wp_privacy_completed_request( $request_id );
-
-	return $response;
 }
